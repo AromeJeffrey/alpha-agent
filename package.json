@@ -1,0 +1,20 @@
+{
+  "name": "alpha-agent",
+  "version": "1.0.0",
+  "description": "Web3 Alpha Intelligence Agent",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.15.0",
+    "dotenv": "^17.4.1",
+    "node-cron": "^3.0.3",
+    "node-telegram-bot-api": "^0.63.0",
+    "rss-parser": "^3.13.0"
+  }
+}
