@@ -9,6 +9,14 @@ const { getNewsSignals }        = require("./newsSignals");
 const { analyzeSignals }        = require("./analyzeSignals");
 const { checkForNews }          = require("./newsMonitor");
 
+const CATEGORY_EMOJI = {
+    CRYPTO:   "🪙",
+    POLITICS: "🏛",
+    TECH:     "💻",
+    SPORTS:   "🏆",
+    OTHER:    "🔮"
+};
+
 async function runAgent() {
 
     console.log(`[${new Date().toISOString()}] Running Alpha Agent...`);
@@ -65,20 +73,20 @@ async function runAgent() {
         message += "🔮 *Prediction Market Signals*\n\n";
         predictionSignals.forEach(market => {
 
+            const catEmoji      = CATEGORY_EMOJI[market.category] || "🔮";
             let confidenceEmoji = "🟡";
             if (market.confidence >= 8)      confidenceEmoji = "🟢";
             else if (market.confidence <= 4) confidenceEmoji = "🔴";
 
-            message += `${market.question}\n`;
+            message += `${catEmoji} ${market.category} | ${market.question}\n`;
             message += `Bet: ${market.betSide} @ ${market.betPrice}¢\n`;
             message += `$5 pays $${market.payout5} | $10 pays $${market.payout10}\n`;
             message += `${confidenceEmoji} Confidence: ${market.confidence}/10 | ${market.verdict}\n`;
 
-            // Show bookmaker edge if available
             if (market.bookmakerProb !== null && market.edge !== null) {
-                const edgeNum = parseFloat(market.edge);
+                const edgeNum   = parseFloat(market.edge);
                 const edgeEmoji = edgeNum > 0 ? "📈" : "📉";
-                message += `${edgeEmoji} Bookmaker prob: ${market.bookmakerProb}% vs Polymarket: ${market.betPrice}% | Edge: ${edgeNum > 0 ? "+" : ""}${market.edge}%\n`;
+                message += `${edgeEmoji} Bookmaker: ${market.bookmakerProb}% vs Polymarket: ${market.betPrice}% | Edge: ${edgeNum > 0 ? "+" : ""}${market.edge}%\n`;
             }
 
             if (market.reasoning) message += `💬 ${market.reasoning}\n`;
