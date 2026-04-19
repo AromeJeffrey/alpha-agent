@@ -3,17 +3,27 @@ require("dotenv").config();
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-async function analyzeSignals({ volumeSignals, narrativeSignals, nftSignals, walletSignals, predictionSignals, newsSignals }) {
+async function analyzeSignals({ volumeSignals, narrativeSignals, nftSignals, walletSignals, predictionSignals, newsSignals, fgData }) {
 
     try {
 
-        // Build a clean summary of all signals to feed to the AI
         let context = "";
 
+        // Fear & Greed context
+        if (fgData) {
+            context += `MARKET SENTIMENT:\n`;
+            context += `Fear & Greed Index: ${fgData.value}/100 (${fgData.label})\n`;
+            context += `Bias: ${fgData.bias}\n\n`;
+        }
+
         if (volumeSignals.length > 0) {
-            context += "MOMENTUM SIGNALS:\n";
+            context += "TRADE SIGNALS:\n";
             volumeSignals.forEach(c => {
-                context += `- ${c.name} (${c.symbol}): $${c.price}, 24h change ${c.change.toFixed(2)}%\n`;
+                context += `- ${c.name} (${c.symbol}): $${c.price}, RSI ${c.rsi}, Vol ${c.volumeRatio}x\n`;
+                context += `  ${c.direction} | ${c.setupType} | Confidence ${c.confidence}%\n`;
+                context += `  Entry $${c.entry} | SL $${c.stopLoss} | TP $${c.takeProfit}\n`;
+                context += `  Position: $${c.positionSize} at ${c.leverage}x | Profit at TP: +$${c.profitAtTP}\n`;
+                context += `  Reason: ${c.reasoning}\n`;
             });
             context += "\n";
         }
@@ -21,31 +31,16 @@ async function analyzeSignals({ volumeSignals, narrativeSignals, nftSignals, wal
         if (narrativeSignals.length > 0) {
             context += "TRENDING NARRATIVES:\n";
             narrativeSignals.forEach(c => {
-                context += `- ${c.name} (${c.symbol}), trend score ${c.score}\n`;
-            });
-            context += "\n";
-        }
-
-        if (nftSignals.length > 0) {
-            context += "NFT SIGNALS:\n";
-            nftSignals.forEach(n => {
-                context += `- ${n.name} (${n.symbol}): $${n.price}, 24h ${n.change24h}, volume ${n.volume24h}\n`;
-            });
-            context += "\n";
-        }
-
-        if (walletSignals.length > 0) {
-            context += "SMART MONEY WALLETS:\n";
-            walletSignals.forEach(w => {
-                context += `- ${w.label} (${w.address}): ${w.ethBalance}, ${w.txCount} recent txns\n`;
+                context += `- ${c.name} (${c.symbol})\n`;
             });
             context += "\n";
         }
 
         if (predictionSignals.length > 0) {
-            context += "PREDICTION MARKET OPPORTUNITIES:\n";
+            context += "PREDICTION MARKETS:\n";
             predictionSignals.forEach(m => {
-                context += `- "${m.question}" — Bet ${m.betSide} @ ${m.betPrice}, $10 pays $${m.payout10}, 24hr vol $${m.volume24hr}, liquidity $${m.liquidity}\n`;
+                context += `- "${m.question}" — ${m.betSide} @ ${m.betPrice}¢, $10 pays $${m.payout10}, confidence ${m.confidence}/10\n`;
+                if (m.edge) context += `  Bookmaker edge: +${m.edge}%\n`;
             });
             context += "\n";
         }
@@ -65,36 +60,44 @@ async function analyzeSignals({ volumeSignals, narrativeSignals, nftSignals, wal
                 messages: [
                     {
                         role: "system",
-                        content: `You are a sharp, no-nonsense Web3 alpha analyst. 
-You receive raw market signals every day and your job is to give a concise, actionable intelligence brief.
-Your tone is direct, confident, and focused on making money.
-Always structure your response in exactly this format:
+                        content: `You are an elite crypto analyst and perps trader — top 0.0001% globally.
+You trade on Bybit and MEXC with $25 capital per trade targeting 50% daily returns.
+You use Fear & Greed to size positions and bias your directional calls.
+
+Structure your response in EXACTLY this format:
 
 🧠 AI ALPHA BRIEF
 
 📊 MARKET MOOD
-One sentence on overall crypto market sentiment based on the signals.
+One sentence on sentiment. Factor in Fear & Greed index.
 
-🎯 TOP TRADE OPPORTUNITY
-The single best trade or bet from all signals. Be specific — name the asset or market, give the entry, explain why briefly.
+🎯 BEST TRADES TODAY
+Top 3 setups. For each:
+- Coin, direction, entry, SL, TP
+- Position size and leverage
+- Expected profit and timeframe
+- One sentence why this is the play right now
+
+📅 BEST TRADES THIS WEEK
+2 swing setups with wider targets. Entry, TP, timeframe.
 
 🔮 BEST PREDICTION BET
-Pick the single best Polymarket bet. State the market, which side, the price, the $10 payout, and give one sentence of reasoning.
+Best Polymarket bet. Why the outcome is likely based on real world context.
 
-📰 NEWS THAT MATTERS
-Pick the 1-2 news items most likely to move markets. One sentence each on why it matters.
+📰 NEWS ALPHA
+1-2 headlines most likely to move markets in next 4 hours.
 
 ⚠️ RISK NOTE
-One sentence warning about the biggest risk in today's signals.
+One sentence on biggest risk to watch.
 
-Keep the entire brief under 300 words. No fluff.`
+Under 400 words. Be direct. Think like a professional trader who needs to make 50% today.`
                     },
                     {
                         role: "user",
-                        content: `Here are today's signals:\n\n${context}\n\nGive me the alpha brief.`
+                        content: `Signals:\n\n${context}\nGive me the alpha brief.`
                     }
                 ],
-                max_tokens: 500,
+                max_tokens: 700,
                 temperature: 0.7
             },
             {
