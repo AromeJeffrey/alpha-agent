@@ -1,48 +1,50 @@
 const axios = require("axios");
 require("dotenv").config();
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${GEMINI_API_KEY}`;
 
 async function analyzeSignals({ volumeSignals, narrativeSignals, nftSignals, walletSignals, predictionSignals, newsSignals, fgData }) {
 
     try {
 
+        // Build strict context from verified signals only
         let context = "";
 
-        // Fear & Greed context
         if (fgData) {
             context += `MARKET SENTIMENT:\n`;
-            context += `Fear & Greed Index: ${fgData.value}/100 (${fgData.label})\n`;
+            context += `Fear & Greed: ${fgData.value}/100 (${fgData.label})\n`;
             context += `Bias: ${fgData.bias}\n\n`;
         }
 
         if (volumeSignals.length > 0) {
-            context += "TRADE SIGNALS:\n";
-            volumeSignals.forEach(c => {
-                context += `- ${c.name} (${c.symbol}): $${c.price}, RSI ${c.rsi}, Vol ${c.volumeRatio}x\n`;
-                context += `  ${c.direction} | ${c.setupType} | Confidence ${c.confidence}%\n`;
-                context += `  Entry $${c.entry} | SL $${c.stopLoss} | TP $${c.takeProfit}\n`;
-                context += `  Position: $${c.positionSize} at ${c.leverage}x | Profit at TP: +$${c.profitAtTP}\n`;
-                context += `  Reason: ${c.reasoning}\n`;
+            context += "VERIFIED TRADE SIGNALS (use ONLY these, do not invent others):\n";
+            volumeSignals.forEach((c, i) => {
+                context += `${i + 1}. ${c.name} (${c.symbol})\n`;
+                context += `   Current Price: $${c.price}\n`;
+                context += `   Direction: ${c.direction} | Setup: ${c.setupType}\n`;
+                context += `   Entry: $${c.entry} | SL: $${c.stopLoss} | TP: $${c.takeProfit}\n`;
+                context += `   Position: $${c.positionSize} at ${c.leverage}x leverage\n`;
+                context += `   Profit at TP: +$${c.profitAtTP} | Loss at SL: -$${c.lossAtSL}\n`;
+                context += `   Confidence: ${c.confidence}% | RSI: ${c.rsi} | Volume: ${c.volumeRatio}x avg\n`;
+                context += `   Timeframe: ${c.timeframe}\n`;
+                context += `   Reason: ${c.reasoning}\n\n`;
             });
-            context += "\n";
-        }
-
-        if (narrativeSignals.length > 0) {
-            context += "TRENDING NARRATIVES:\n";
-            narrativeSignals.forEach(c => {
-                context += `- ${c.name} (${c.symbol})\n`;
-            });
-            context += "\n";
+        } else {
+            context += "VERIFIED TRADE SIGNALS: None found this run.\n\n";
         }
 
         if (predictionSignals.length > 0) {
-            context += "PREDICTION MARKETS:\n";
+            context += "VERIFIED PREDICTION MARKETS (use ONLY these):\n";
             predictionSignals.forEach(m => {
-                context += `- "${m.question}" — ${m.betSide} @ ${m.betPrice}¢, $10 pays $${m.payout10}, confidence ${m.confidence}/10\n`;
-                if (m.edge) context += `  Bookmaker edge: +${m.edge}%\n`;
+                context += `- "${m.question}"\n`;
+                context += `  Bet: ${m.betSide} @ ${m.betPrice}¢ | $10 pays $${m.payout10}\n`;
+                context += `  Confidence: ${m.confidence}/10 | Verdict: ${m.verdict}\n`;
+                if (m.bookmakerProb && m.edge) {
+                    context += `  Bookmaker: ${m.bookmakerProb}% vs Polymarket: ${m.betPrice}% | Edge: +${m.edge}%\n`;
+                }
+                context += `  Reasoning: ${m.reasoning}\n\n`;
             });
-            context += "\n";
         }
 
         if (newsSignals.length > 0) {
@@ -53,66 +55,77 @@ async function analyzeSignals({ volumeSignals, narrativeSignals, nftSignals, wal
             context += "\n";
         }
 
-        const response = await axios.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            {
-                model: "llama-3.1-8b-instant",
-                messages: [
-                    {
-                        role: "system",
-                        content: `You are an elite crypto analyst and perps trader — top 0.0001% globally.
+        const prompt = `You are an elite crypto analyst and perps trader — top 0.0001% globally.
 You trade on Bybit and MEXC with $25 capital per trade targeting 50% daily returns.
-You use Fear & Greed to size positions and bias your directional calls.
 
-Structure your response in EXACTLY this format:
+CRITICAL RULES — MUST FOLLOW:
+1. ONLY reference coins and markets from the VERIFIED TRADE SIGNALS and VERIFIED PREDICTION MARKETS sections below
+2. NEVER invent prices, coins, or trade levels not in the provided data
+3. Use the EXACT entry, SL, and TP values from the data — do not change them
+4. Calculate profit correctly: position_size × leverage × (TP - entry) / entry
+5. If a section has no data, write "No signals this run" — never invent alternatives
+
+Here is today's verified signal data:
+
+${context}
+
+Respond in EXACTLY this format:
 
 🧠 AI ALPHA BRIEF
 
 📊 MARKET MOOD
-One sentence on sentiment. Factor in Fear & Greed index.
+One sentence on sentiment. Factor in Fear & Greed.
 
 🎯 BEST TRADES TODAY
-Top 3 setups. For each:
-- Coin, direction, entry, SL, TP
+Top 3 from verified signals only. For each:
+- Coin name, direction
+- Entry / SL / TP (use exact values from data)
 - Position size and leverage
-- Expected profit and timeframe
+- Correct profit calculation
 - One sentence why this is the play right now
+- Timeframe
 
 📅 BEST TRADES THIS WEEK
-2 swing setups with wider targets. Entry, TP, timeframe.
+2 swing setups from verified signals with wider timeframes and reasoning.
 
 🔮 BEST PREDICTION BET
-Best Polymarket bet. Why the outcome is likely based on real world context.
+From verified prediction markets only. State the market, bet side, price, payout, and one sentence on why the outcome is likely based on real world context.
 
 📰 NEWS ALPHA
-1-2 headlines most likely to move markets in next 4 hours.
+1-2 headlines most likely to move markets in the next 4 hours. Name the specific coin affected.
 
 ⚠️ RISK NOTE
-One sentence on biggest risk to watch.
+One sentence on the biggest risk to watch right now.
 
-Under 400 words. Be direct. Think like a professional trader who needs to make 50% today.`
-                    },
+Under 400 words. Be direct. Think like a professional trader.`;
+
+        const response = await axios.post(
+            GEMINI_URL,
+            {
+                contents: [
                     {
-                        role: "user",
-                        content: `Signals:\n\n${context}\nGive me the alpha brief.`
+                        parts: [{ text: prompt }]
                     }
                 ],
-                max_tokens: 700,
-                temperature: 0.7
+                generationConfig: {
+                    temperature:     0.4,
+                    maxOutputTokens: 800,
+                    topP:            0.8
+                }
             },
             {
-                headers: {
-                    "Authorization": `Bearer ${GROQ_API_KEY}`,
-                    "Content-Type":  "application/json"
-                },
-                timeout: 15000
+                headers:  { "Content-Type": "application/json" },
+                timeout:  20000
             }
         );
 
-        return response.data.choices[0].message.content;
+        const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("Empty response from Gemini");
+
+        return text;
 
     } catch (error) {
-        console.error("Groq analysis error:", error.message);
+        console.error("Gemini analysis error:", error.message);
         return null;
     }
 }
