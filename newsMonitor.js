@@ -84,20 +84,27 @@ function isRecentArticle(pubDate) {
     return new Date(pubDate).getTime() > Date.now() - (2 * 60 * 60 * 1000);
 }
 
-async function getAIContext(title, source) {
-    try {
-        const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-            {
-                contents: [{ parts: [{ text: `Crypto trader perspective. This just broke: "${title}". Write ONE sentence (max 15 words) on the immediate trade implication. Be specific.` }] }],
-                generationConfig: { temperature: 0.3, maxOutputTokens: 50 }
-            },
-            { headers: { "Content-Type": "application/json" }, timeout: 8000 }
-        );
-        return response.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
-    } catch (err) {
-        return null;
+async function getAIContext(title, source, retries = 2) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            const response = await axios.post(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+                {
+                    contents: [{ parts: [{ text: `Crypto trader perspective. This just broke: "${title}". Write ONE sentence (max 15 words) on the immediate trade implication. Be specific.` }] }],
+                    generationConfig: { temperature: 0.3, maxOutputTokens: 50 }
+                },
+                { headers: { "Content-Type": "application/json" }, timeout: 8000 }
+            );
+            return response.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+        } catch (err) {
+            if (err.response?.status === 429 && attempt < retries) {
+                await new Promise(r => setTimeout(r, 20000)); // Wait 20s on rate limit
+                continue;
+            }
+            return null; // Fail silently — context is optional
+        }
     }
+    return null;
 }
 
 // ─── NEWS MONITOR ─────────────────────────────────────────
