@@ -4,7 +4,6 @@ require("dotenv").config();
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-// Retry Gemini call up to 3 times with backoff on 429
 async function callGemini(prompt, retries = 3) {
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
@@ -12,122 +11,122 @@ async function callGemini(prompt, retries = 3) {
                 GEMINI_URL,
                 {
                     contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        temperature:     0.4,
-                        maxOutputTokens: 800,
-                        topP:            0.8
-                    }
+                    generationConfig: { temperature: 0.3, maxOutputTokens: 700, topP: 0.8 }
                 },
-                {
-                    headers: { "Content-Type": "application/json" },
-                    timeout: 25000
-                }
+                { headers: { "Content-Type": "application/json" }, timeout: 25000 }
             );
-
             const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!text) throw new Error("Empty response from Gemini");
+            if (!text) throw new Error("Empty response");
             return text;
-
         } catch (error) {
-            const is429 = error.response?.status === 429;
-            const isLast = attempt === retries;
-
-            if (is429 && !isLast) {
-                const waitSecs = attempt * 15; // 15s, 30s, 45s
-                console.log(`Gemini rate limited — waiting ${waitSecs}s before retry ${attempt + 1}/${retries}`);
-                await new Promise(r => setTimeout(r, waitSecs * 1000));
+            if (error.response?.status === 429 && attempt < retries) {
+                const wait = attempt * 15;
+                console.log(`Gemini rate limited — waiting ${wait}s (retry ${attempt + 1}/${retries})`);
+                await new Promise(r => setTimeout(r, wait * 1000));
                 continue;
             }
-
             throw error;
         }
     }
 }
 
-async function analyzeSignals({ volumeSignals, narrativeSignals, nftSignals, walletSignals, predictionSignals, newsSignals, fgData }) {
+async function analyzeSignals({ volumeSignals, narrativeSignals, predictionSignals, newsSignals, fgData, noTradeToday }) {
 
     try {
+
+        // If no trades found, give a different brief
+        if (noTradeToday) {
+            const noTradePrompt = `You are a disciplined professional crypto trader.
+
+Today's scan found NO trades that passed the confluence threshold.
+Fear & Greed: ${fgData?.value || 50}/100 (${fgData?.label || "Neutral"})
+Market bias: ${fgData?.bias || "Neutral"}
+
+Write a brief NO TRADE TODAY message (max 100 words) explaining:
+- Why protecting capital today is the right call
+- What market conditions would need to change before entering trades
+- One thing to watch for the next session
+
+Be direct and professional. No fluff.`;
+
+            return await callGemini(noTradePrompt);
+        }
 
         let context = "";
 
         if (fgData) {
-            context += `MARKET SENTIMENT:\n`;
-            context += `Fear & Greed: ${fgData.value}/100 (${fgData.label})\n`;
+            context += `MARKET SENTIMENT: Fear & Greed ${fgData.value}/100 (${fgData.label})\n`;
             context += `Bias: ${fgData.bias}\n\n`;
         }
 
         if (volumeSignals.length > 0) {
-            context += "VERIFIED TRADE SIGNALS (use ONLY these, do not invent others):\n";
+            context += "VERIFIED TRADE SETUPS:\n";
             volumeSignals.forEach((c, i) => {
-                context += `${i + 1}. ${c.name} (${c.symbol})\n`;
-                context += `   Price: $${c.price}\n`;
-                context += `   ${c.direction} | ${c.setupType} | Confidence: ${c.confidence}%\n`;
-                context += `   Entry: $${c.entry} | SL: $${c.stopLoss} | TP: $${c.takeProfit}\n`;
-                context += `   Position: $${c.positionSize} at ${c.leverage}x\n`;
-                context += `   Profit at TP: +$${c.profitAtTP} | Loss at SL: -$${c.lossAtSL}\n`;
-                context += `   RSI: ${c.rsi} | Volume: ${c.volumeRatio}x | Timeframe: ${c.timeframe}\n`;
+                context += `${i + 1}. ${c.name} (${c.symbol}) — ${c.direction}\n`;
+                context += `   Setup: ${c.setupType} | Confluence: ${c.confluenceScore}/100\n`;
+                context += `   Price: $${c.price} | Entry: $${c.entry} | SL: $${c.stopLoss} | TP: $${c.takeProfit}\n`;
+                context += `   Leverage: ${c.leverage}x | R:R 1:${c.rrRatio} | Profit at TP: +$${c.profitAtTP}\n`;
+                context += `   Timeframe: ${c.timeframe}\n`;
+                context += `   Invalidation: ${c.invalidation}\n`;
                 context += `   Reason: ${c.reasoning}\n\n`;
             });
-        } else {
-            context += "VERIFIED TRADE SIGNALS: None found this run.\n\n";
         }
 
         if (predictionSignals.length > 0) {
-            context += "VERIFIED PREDICTION MARKETS (use ONLY these):\n";
+            context += "PREDICTION MARKET EDGES:\n";
             predictionSignals.forEach(m => {
                 context += `- "${m.question}"\n`;
-                context += `  ${m.betSide} @ ${m.betPrice}¢ | $10 pays $${m.payout10} | Confidence: ${m.confidence}/10\n`;
-                if (m.bookmakerProb && m.edge) {
-                    context += `  Bookmaker: ${m.bookmakerProb}% | Edge: +${m.edge}%\n`;
-                }
+                context += `  BET ${m.betSide} @ ${m.marketPrice}¢ | Fair value: ${m.fairValue}% | Edge: +${m.edge}%\n`;
+                context += `  Confidence: ${m.confidence}/10 | $10 pays $${m.payout10}\n`;
                 context += `  ${m.reasoning}\n\n`;
             });
         }
 
         if (newsSignals.length > 0) {
-            context += "BREAKING NEWS:\n";
-            newsSignals.forEach(n => context += `- ${n.title} (${n.source})\n`);
-            context += "\n";
+            context += "NEWS:\n";
+            newsSignals.slice(0, 3).forEach(n => context += `- ${n.title}\n`);
         }
 
-        const prompt = `You are an elite crypto analyst and perps trader — top 0.0001% globally.
-Trading on Bybit and MEXC with $25 capital targeting 50% daily returns.
+        const prompt = `You are a professional Web3 decision engine — elite crypto analyst and perps trader.
+Trading on Bybit and MEXC with $25 capital. Goal: disciplined daily profits.
 
-CRITICAL RULES:
-1. ONLY reference coins from VERIFIED TRADE SIGNALS — never invent others
-2. Use EXACT entry, SL, TP values from the data
-3. Calculate profit as: position_size × leverage × (TP - entry) / entry
-4. If no signals exist for a section, say "No signals this run"
+RULES:
+1. ONLY reference the verified setups listed below
+2. Use EXACT prices from the data — never invent numbers
+3. Be brutally honest — if a setup looks weak, say so
+4. Think like a risk manager, not a hype machine
 
-Verified data:
+Today's verified data:
 ${context}
 
 Respond in this EXACT format:
 
-🧠 AI ALPHA BRIEF
+🧠 DECISION BRIEF
 
-📊 MARKET MOOD
-One sentence. Include Fear & Greed reading.
+📊 MARKET READ
+2 sentences. BTC macro + Fear & Greed reading + what it means for today.
 
-🎯 BEST TRADES TODAY
-Top 3 from verified signals. For each:
-- Name, direction, entry/SL/TP (exact values)
-- Position size, leverage, profit at TP
-- Timeframe and one sentence why
+🎯 PRIORITY TRADE
+The single best setup from verified signals only.
+- Name, direction, entry/SL/TP (exact)
+- Leverage and capital
+- Why this is the strongest setup today
+- What would invalidate it
 
-📅 BEST TRADES THIS WEEK
-2 swing setups from verified signals. Entry, TP, timeframe.
+📈 SECONDARY TRADE (if exists)
+Second best setup. Same format. Skip if only one trade exists.
 
-🔮 BEST PREDICTION BET
-From verified markets only. Why the outcome is likely.
+🎯 BEST PREDICTION BET (if exists)
+Market name, BET side, price, fair value, edge, $10 payout.
+Why the market is mispriced right now.
 
-📰 NEWS ALPHA
-1-2 headlines affecting markets in next 4 hours. Name the coin.
+⚡ CATALYST TO WATCH
+One thing in the news that could accelerate or kill today's trades.
 
-⚠️ RISK NOTE
-One sentence on biggest risk today.
+⚠️ RISK
+One sentence. What kills all of today's setups.
 
-Under 400 words. Be direct.`;
+Under 350 words. Decisive. Professional.`;
 
         return await callGemini(prompt);
 

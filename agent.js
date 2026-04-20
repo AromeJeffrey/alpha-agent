@@ -1,4 +1,4 @@
-const cron                      = require("node-cron");
+ const cron                      = require("node-cron");
 const { sendAlert }             = require("./telegram");
 const { getVolumeSignals }      = require("./signals");
 const { getWalletSignals }      = require("./walletSignals");
@@ -9,16 +9,10 @@ const { getNewsSignals }        = require("./newsSignals");
 const { analyzeSignals }        = require("./analyzeSignals");
 const { checkForNews }          = require("./newsMonitor");
 const { getFearAndGreed }       = require("./fearGreed");
+const { MINIMUM_CONFLUENCE }    = require("./confluence");
 
-const CATEGORY_EMOJI = {
-    CRYPTO:   "🪙",
-    POLITICS: "🏛",
-    TECH:     "💻",
-    SPORTS:   "🏆",
-    OTHER:    "🔮"
-};
+const CATEGORY_EMOJI = { CRYPTO: "🪙", POLITICS: "🏛", TECH: "💻", SPORTS: "🏆", OTHER: "🔮" };
 
-// Prevent double runs if Railway restarts mid-execution
 let isRunning = false;
 
 function getFGEmoji(value) {
@@ -29,10 +23,17 @@ function getFGEmoji(value) {
     return "🤑";
 }
 
+function formatPrice(price) {
+    if (price < 0.0001) return price.toExponential(4);
+    if (price < 1)      return price.toFixed(8);
+    if (price < 100)    return price.toFixed(4);
+    return price.toFixed(2);
+}
+
 async function runAgent() {
 
     if (isRunning) {
-        console.log("Agent already running — skipping duplicate trigger.");
+        console.log("Agent already running — skipping.");
         return;
     }
     isRunning = true;
@@ -48,8 +49,8 @@ async function runAgent() {
 
         const trendingSymbols = narrativeSignals.map(c => c.symbol?.toUpperCase());
 
-        const [volumeSignals, walletSignals,
-               nftSignals, predictionSignals, newsSignals] = await Promise.allSettled([
+        const [volumeSignals, walletSignals, nftSignals,
+               predictionSignals, newsSignals] = await Promise.allSettled([
             getVolumeSignals(trendingSymbols, fgData),
             getWalletSignals(),
             getNFTSignals(),
@@ -57,119 +58,130 @@ async function runAgent() {
             getNewsSignals()
         ]).then(results => results.map(r => r.status === "fulfilled" ? r.value : []));
 
-        let message = "🚨 Alpha Agent Intelligence Report\n";
+        const hasTradeSignals      = volumeSignals.length > 0;
+        const hasPredictionSignals = predictionSignals.length > 0;
+        const noTradeToday         = !hasTradeSignals && !hasPredictionSignals;
+
+        let message = "📡 *Alpha Decision Engine*\n";
         message += `🕐 ${new Date().toUTCString()}\n\n`;
 
-        // ── FEAR & GREED ──────────────────────────────────
+        // ── MARKET CONTEXT ────────────────────────────────
         const fgEmoji = getFGEmoji(fgData.value);
-        message += `${fgEmoji} *Market Sentiment: ${fgData.label} (${fgData.value}/100)*\n`;
+        message += `${fgEmoji} *Sentiment: ${fgData.label} (${fgData.value}/100)*\n`;
         message += `📌 ${fgData.bias}\n\n`;
 
-        // ── PARABOLIC CANDIDATES ──────────────────────────
-        const parabolicSignals = volumeSignals.filter(c => c.isParabolic);
-        if (parabolicSignals.length > 0) {
-            message += "🚀 *PARABOLIC CANDIDATES*\n";
-            message += `_(High volume + accumulation — ENJ-type setups)_\n\n`;
-
-            parabolicSignals.forEach(coin => {
-                message += `*${coin.name} (${coin.symbol})*\n`;
-                if (coin.isDoubleSignal) message += `🔥 DOUBLE SIGNAL\n`;
-                message += `🟢 LONG | ${coin.setupType}\n`;
-                message += `Confidence: ${coin.confidence}%\n`;
-                message += `MCap: $${(coin.marketCap/1e6).toFixed(0)}M\n\n`;
-                message += `Entry: $${coin.entry}\n`;
-                message += `SL: $${coin.stopLoss} | TP: $${coin.takeProfit}\n`;
-                message += `Timeframe: ${coin.timeframe}\n\n`;
-                message += `💰 $${coin.positionSize} at ${coin.leverage}x\n`;
-                message += `✅ +$${coin.profitAtTP} | ❌ -$${coin.lossAtSL} | R/R 1:${coin.rrRatio}\n\n`;
-                message += `RSI: ${coin.rsi} | Vol: ${coin.volumeRatio}x\n`;
-                message += `💬 ${coin.reasoning}\n\n`;
-            });
+        // ── NO TRADE MODE ─────────────────────────────────
+        if (noTradeToday) {
+            message += "🛑 *NO TRADE TODAY*\n\n";
+            message += `No setups passed the ${MINIMUM_CONFLUENCE}/100 confluence threshold.\n`;
+            message += `Capital is protected. Wait for better conditions.\n\n`;
+            message += `Confluence requires: momentum + volume + narrative + sentiment + BTC macro alignment.\n\n`;
         }
 
         // ── TRADE SIGNALS ─────────────────────────────────
-        const regularSignals = volumeSignals.filter(c => !c.isParabolic);
-        if (regularSignals.length > 0) {
-            message += "📊 *Perps Trade Signals*\n_(Bybit / MEXC)_\n\n";
+        if (hasTradeSignals) {
 
-            regularSignals.forEach((coin, i) => {
-                const dirEmoji = coin.direction === "LONG" ? "🟢 LONG" : "🔴 SHORT";
-                message += `*${i + 1}. ${coin.name} (${coin.symbol})*\n`;
-                message += `${dirEmoji} | ${coin.setupType} | ${coin.confidence}%\n\n`;
-                message += `Entry: $${coin.entry}\n`;
-                message += `SL: $${coin.stopLoss} | TP: $${coin.takeProfit}\n`;
-                message += `Timeframe: ${coin.timeframe}\n\n`;
-                message += `💰 $${coin.positionSize} at ${coin.leverage}x | R/R 1:${coin.rrRatio}\n`;
-                message += `✅ +$${coin.profitAtTP} | ❌ -$${coin.lossAtSL}\n\n`;
-                message += `RSI: ${coin.rsi} | Vol: ${coin.volumeRatio}x\n`;
-                message += `💬 ${coin.reasoning}\n\n`;
+            const parabolic = volumeSignals.filter(c => c.isParabolic);
+            const regular   = volumeSignals.filter(c => !c.isParabolic);
+
+            if (parabolic.length > 0) {
+                message += "🚀 *HIGH CONVICTION — PARABOLIC SETUPS*\n\n";
+
+                parabolic.forEach(coin => {
+                    message += `*${coin.name} (${coin.symbol})*\n`;
+                    if (coin.isDoubleSignal) message += `🔥 DOUBLE SIGNAL: Trending + Volume\n`;
+                    message += `\n`;
+                    message += `Direction: 🟢 ${coin.direction}\n`;
+                    message += `Setup: ${coin.setupType}\n`;
+                    message += `Confluence: ${coin.confluenceScore}/100\n`;
+                    message += `BTC Macro: ${coin.btcTrend}\n\n`;
+                    message += `Entry Zone: $${formatPrice(coin.entry)}\n`;
+                    message += `Stop Loss:  $${formatPrice(coin.stopLoss)}\n`;
+                    message += `Take Profit: $${formatPrice(coin.takeProfit)}\n`;
+                    message += `Invalidation: ${coin.invalidation}\n\n`;
+                    message += `R:R Ratio: 1:${coin.rrRatio}\n`;
+                    message += `Leverage: ${coin.leverage}x\n`;
+                    message += `Capital: $${coin.positionSize}\n`;
+                    message += `✅ Profit at TP: +$${coin.profitAtTP}\n`;
+                    message += `❌ Max Loss at SL: -$${coin.lossAtSL}\n\n`;
+                    message += `Timeframe: ${coin.timeframe}\n`;
+                    message += `RSI: ${coin.rsi} | Volume: ${coin.volumeRatio}x avg\n`;
+                    message += `💬 ${coin.reasoning}\n\n`;
+                });
+            }
+
+            if (regular.length > 0) {
+                message += "📊 *TRADE SIGNALS*\n\n";
+
+                regular.forEach((coin, i) => {
+                    const dir      = coin.direction === "LONG" ? "🟢 LONG" : "🔴 SHORT";
+                    const divBadge = coin.divergence ? `\n⚡ ${coin.divergence}` : "";
+                    message += `*${i + 1}. ${coin.name} (${coin.symbol})*\n`;
+                    message += `${dir} | ${coin.setupType}${divBadge}\n`;
+                    message += `Confluence: ${coin.confluenceScore}/100 | BTC: ${coin.btcTrend}\n\n`;
+                    message += `Entry Zone: $${formatPrice(coin.entry)}\n`;
+                    message += `Stop Loss:  $${formatPrice(coin.stopLoss)}\n`;
+                    message += `Take Profit: $${formatPrice(coin.takeProfit)}\n`;
+                    message += `Invalidation: ${coin.invalidation}\n\n`;
+                    message += `R:R: 1:${coin.rrRatio} | Leverage: ${coin.leverage}x\n`;
+                    message += `✅ +$${coin.profitAtTP} | ❌ -$${coin.lossAtSL}\n`;
+                    message += `Timeframe: ${coin.timeframe}\n`;
+                    message += `RSI: ${coin.rsi} | Vol: ${coin.volumeRatio}x\n`;
+                    message += `💬 ${coin.reasoning}\n\n`;
+                });
+            }
+        }
+
+        // ── PREDICTION MARKETS ────────────────────────────
+        if (hasPredictionSignals) {
+            message += "🎯 *PREDICTION MARKET EDGES*\n\n";
+
+            predictionSignals.forEach(market => {
+                const catEmoji = CATEGORY_EMOJI[market.category] || "🔮";
+                message += `${catEmoji} *${market.question}*\n\n`;
+                message += `BET: ${market.betSide}\n`;
+                message += `Current Price: ${market.marketPrice}¢\n`;
+                message += `Fair Value: ${market.fairValue}%\n`;
+                message += `Edge: +${market.edge}%\n`;
+                message += `Confidence: ${market.confidence}/10\n\n`;
+                message += `$5 wager pays $${market.payout5}\n`;
+                message += `$10 wager pays $${market.payout10}\n\n`;
+                if (market.bookmakerProb) {
+                    message += `Bookmaker consensus: ${market.bookmakerProb}%\n`;
+                }
+                message += `💬 ${market.reasoning}\n`;
+                message += `🔗 ${market.url}\n\n`;
             });
         }
 
-        // ── NARRATIVE SIGNALS ─────────────────────────────
+        // ── TRENDING NARRATIVES ───────────────────────────
         if (narrativeSignals.length > 0) {
-            message += "🔥 *Trending Narratives*\n\n";
-            narrativeSignals.forEach(coin => {
-                message += `${coin.name} (${coin.symbol})\n`;
+            message += "🔥 *Trending Narratives*\n";
+            narrativeSignals.slice(0, 5).forEach(c => {
+                message += `${c.name} (${c.symbol})\n`;
             });
             message += "\n";
         }
 
-        // ── NFT SIGNALS ───────────────────────────────────
-        if (nftSignals.length > 0) {
-            message += "🖼 *NFT Signals*\n\n";
-            nftSignals.forEach(nft => {
-                message += `${nft.name} (${nft.symbol})\n`;
-                message += `$${nft.price} | 24h: ${nft.change24h} | Vol: ${nft.volume24h}\n\n`;
-            });
-        }
-
-        // ── WALLET TRACKER ────────────────────────────────
+        // ── SMART MONEY ───────────────────────────────────
         if (walletSignals.length > 0) {
-            message += "🐋 *Wallet Tracker*\n\n";
+            message += "🐋 *Smart Money*\n";
             walletSignals.forEach(w => {
                 message += `${w.label}: ${w.ethBalance}\n`;
             });
             message += "\n";
         }
 
-        // ── PREDICTION MARKETS ────────────────────────────
-        // Filter out low-relevance markets for daily report
-        const relevantPredictions = predictionSignals.filter(m =>
-            ["CRYPTO", "POLITICS", "SPORTS", "TECH"].includes(m.category) &&
-            parseFloat(m.liquidity) > 10000 && // Only liquid markets
-            m.verdict === "RECOMMEND"
-        );
-
-        if (relevantPredictions.length > 0) {
-            message += "🔮 *Prediction Markets*\n\n";
-            relevantPredictions.forEach(market => {
-                const catEmoji      = CATEGORY_EMOJI[market.category] || "🔮";
-                let confidenceEmoji = market.confidence >= 8 ? "🟢" : "🟡";
-
-                message += `${catEmoji} ${market.question}\n`;
-                message += `${market.betSide} @ ${market.betPrice}¢ | $10 pays $${market.payout10}\n`;
-                message += `${confidenceEmoji} ${market.confidence}/10`;
-
-                if (market.bookmakerProb && market.edge) {
-                    message += ` | Bookmaker: ${market.bookmakerProb}% | Edge: +${market.edge}%`;
-                }
-
-                message += `\n💬 ${market.reasoning}\n`;
-                message += `🔗 ${market.url}\n\n`;
-            });
-        }
-
-        // ── NEWS SUMMARY (top 3 only, no duplicates) ──────
+        // ── NEWS ──────────────────────────────────────────
         if (newsSignals.length > 0) {
-            message += "📰 *News*\n\n";
-            newsSignals.slice(0, 3).forEach(article => {
-                message += `${article.title} — ${article.source}\n`;
+            message += "📰 *News*\n";
+            newsSignals.slice(0, 3).forEach(n => {
+                message += `${n.title} — ${n.source}\n`;
             });
             message += "\n";
         }
 
-        // ── AI BRIEF ──────────────────────────────────────
+        // ── AI DECISION BRIEF ─────────────────────────────
         console.log(`[${new Date().toISOString()}] Running AI analysis...`);
 
         const aiAnalysis = await analyzeSignals({
@@ -177,9 +189,10 @@ async function runAgent() {
             narrativeSignals,
             nftSignals,
             walletSignals,
-            predictionSignals: relevantPredictions,
+            predictionSignals,
             newsSignals,
-            fgData
+            fgData,
+            noTradeToday
         });
 
         if (aiAnalysis) {
@@ -188,7 +201,7 @@ async function runAgent() {
         }
 
         await sendAlert(message);
-        console.log(`[${new Date().toISOString()}] Report sent.`);
+        console.log(`[${new Date().toISOString()}] Report sent. Trades: ${volumeSignals.length} | Predictions: ${predictionSignals.length}`);
 
     } finally {
         isRunning = false;
@@ -197,29 +210,23 @@ async function runAgent() {
 
 // ─── SCHEDULES ───────────────────────────────────────────
 
-// Full report every 4 hours
 cron.schedule("0 */4 * * *", () => {
-    console.log(`[${new Date().toISOString()}] Scheduled report starting...`);
+    console.log(`[${new Date().toISOString()}] Scheduled report...`);
     runAgent();
 });
 
-// News + whale + narrative monitor every 15 minutes
 cron.schedule("*/15 * * * *", () => {
     checkForNews();
 });
 
 // ─── STARTUP ─────────────────────────────────────────────
 
-// Small delay on startup to avoid double-fire during Railway deploys
-setTimeout(() => {
-    runAgent();
-}, 5000);
+setTimeout(() => { runAgent(); }, 5000);
 
-// Seed news baseline immediately
 checkForNews().then(() => {
     console.log("News baseline established.");
 });
 
-console.log("Alpha Agent running.");
-console.log("📊 Full report: every 4 hours");
+console.log("Alpha Decision Engine running.");
+console.log(`📊 Reports: every 4 hours | Confluence threshold: ${MINIMUM_CONFLUENCE}/100`);
 console.log("🔴 Alerts: every 15 minutes");
