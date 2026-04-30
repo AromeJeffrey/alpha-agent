@@ -1,29 +1,18 @@
-const axios = require("axios");
+async function getNarrativeSignal() {
+  /*
+    Placeholder narrative tracking.
+    Later:
+    - Twitter/X trend parsing
+    - CT narratives
+    - ecosystem rotations
+  */
 
-async function getNarrativeSignals() {
-
-    try {
-
-        const response = await axios.get(
-            "https://api.coingecko.com/api/v3/search/trending"
-        );
-
-        const coins = response.data.coins;
-
-        const narratives = coins.map(c => ({
-            name: c.item.name,
-            symbol: c.item.symbol,
-            score: c.item.score
-        }));
-
-        return narratives.slice(0, 5);
-
-    } catch (error) {
-
-        console.error("Narrative detection error:", error.message);
-        return [];
-
-    }
+  return {
+    strength: 0.7,
+    narrative: "BTC short squeeze potential"
+  };
 }
 
-module.exports = { getNarrativeSignals };
+module.exports = {
+  getNarrativeSignal
+};
