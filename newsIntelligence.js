@@ -355,4 +355,19 @@ async function checkForNews() {
     return classified;
 }
 
-module.exports = { fetchAndClassifyNews, checkForNews };
+async function buildNewsBaseline() {
+    for (const feed of RSS_FEEDS) {
+        try {
+            const parsed = await parser.parseURL(feed.url);
+            parsed.items.slice(0, 15).forEach(item => {
+                if (item.title) {
+                    seenHeadlines.add(item.title.trim());
+                    seenStoryKeys.add(getStoryKey(item.title.trim()));
+                }
+            });
+        } catch (err) {}
+    }
+    console.log(`[News] Baseline built — ${seenHeadlines.size} headlines cached.`);
+}
+
+module.exports = { fetchAndClassifyNews, checkForNews, buildNewsBaseline };

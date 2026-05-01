@@ -272,7 +272,7 @@ cron.schedule("0 2,6,10,14,18,22 * * *", () => {
 initializeSchema().catch(err => console.error("Journal init error:", err.message));
 
 setTimeout(() => { runAgent(); }, 5000);
-checkForNews().then(() => console.log("Intel baseline established."));
+buildNewsBaseline().then(() => console.log("Intel baseline established."));
 
 console.log("\n╔══════════════════════════════════╗");
 console.log("║   MASTER ALPHA ENGINE ONLINE     ║");

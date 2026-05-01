@@ -1,156 +1,118 @@
-// ================================
-// PROP DESK ENGINE (PERPS + POLYMARKET ONLY)
-// ================================
+// ─── MASTER ALPHA ENGINE ─────────────────────────────────
+// Division 1: Perps Execution
+// Division 2: Prediction Markets
+// + Trade Journal integration
 
-// CORE DATA IMPORTS
-const { getMarketSignals } = require("./signals");
-const { getNewsSignals } = require("./newsSignals");
-const { getMarketSnapshot } = require("./marketData");
+const { getVolumeSignals }     = require("./signals");
+const { getPredictionSignals } = require("./predictionSignals");
+const { getFearAndGreed }      = require("./fearGreed");
+const { getBTCMacro }          = require("./confluence");
+const { getNarrativeSignals }  = require("./narrativeSignals");
+const {
+    logTradeSignal,
+    logPredictionBet,
+    checkPendingOutcomes,
+    getSetupPerformanceFeedback
+} = require("./tradeJournal");
 
-// ================================
-// 1. MARKET CONTEXT (REAL DATA LAYER)
-// ================================
+async function runMasterEngine() {
 
-let marketContext = null;
+    console.log(`[Master Engine] Starting scan...`);
+    const start = Date.now();
 
-async function loadMarketContext() {
-  try {
-    marketContext = await getMarketSnapshot("BTCUSDT");
-  } catch (e) {
-    marketContext = null;
-  }
+    // ── MARKET CONTEXT ───────────────────────────────────
+    const [fgData, btcMacro, narrativeSignals] = await Promise.all([
+        getFearAndGreed(),
+        getBTCMacro(),
+        getNarrativeSignals().catch(() => [])
+    ]);
+
+    const trendingSymbols = narrativeSignals.map(c => c.symbol?.toUpperCase());
+    const regime          = determineRegime(fgData, btcMacro);
+
+    console.log(`[Engine] Regime: ${regime.label} | BTC: ${btcMacro.trend} (${(btcMacro.change24h||0).toFixed(2)}%) | F&G: ${fgData.value}`);
+
+    // Background outcome check
+    checkPendingOutcomes().catch(err =>
+        console.error("[Journal] Outcome check failed:", err.message)
+    );
+
+    // Journal feedback — adjust ranks based on historical win rates
+    const setupFeedback = await getSetupPerformanceFeedback().catch(() => ({}));
+
+    // ── RUN BOTH ENGINES ─────────────────────────────────
+    const [perpsResult, predResult] = await Promise.allSettled([
+        getVolumeSignals(trendingSymbols, fgData, setupFeedback),
+        getPredictionSignals()
+    ]);
+
+    const perpsSignals = perpsResult.status === "fulfilled" ? perpsResult.value : [];
+    const predSignals  = predResult.status  === "fulfilled" ? predResult.value  : [];
+
+    // ── AUTO-LOG ALL SIGNALS ─────────────────────────────
+    const logs = [];
+
+    perpsSignals.forEach(signal => {
+        if (signal.rank === "A+" || signal.rank === "A") {
+            logs.push(logTradeSignal(signal, fgData.value).catch(() => {}));
+        }
+    });
+
+    predSignals.forEach(bet => {
+        if (bet.verdict === "BET THIS" && bet.confidence >= 7) {
+            logs.push(logPredictionBet(bet).catch(() => {}));
+        }
+    });
+
+    Promise.allSettled(logs).then(results => {
+        const logged = results.filter(r => r.status === "fulfilled").length;
+        if (logged > 0) console.log(`[Journal] ${logged} signals logged.`);
+    });
+
+    // ── DECISION OUTPUT ───────────────────────────────────
+    const executableTrades = perpsSignals.filter(s => s.rank === "A+" || s.rank === "A");
+    const executableBets   = predSignals.filter(p => p.verdict === "BET THIS" && p.confidence >= 7);
+
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+    const mode    = executableTrades.length > 0 ? "EXECUTE" :
+                    executableBets.length  > 0  ? "BET_ONLY" : "STANDBY";
+
+    console.log(`[Engine] ${elapsed}s | Mode: ${mode} | Trades: ${executableTrades.length} | Bets: ${executableBets.length}`);
+
+    return {
+        regime,
+        fgData,
+        btcMacro,
+        narrativeSignals,
+        executableTrades,
+        executableBets,
+        // News fields — empty since we stripped news division
+        tradeNews:    [],
+        betNews:      [],
+        watchNews:    [],
+        correlations: [],
+        setupFeedback,
+        noTradeToday: executableTrades.length === 0,
+        noBetsToday:  executableBets.length  === 0,
+        fullyQuiet:   executableTrades.length === 0 && executableBets.length === 0,
+        mode
+    };
 }
 
-// ================================
-// 2. COLLECT SIGNALS SAFELY
-// ================================
+// ─── REGIME DETECTION ────────────────────────────────────
 
-function collectSignals() {
-  let marketSignals = [];
-  let newsSignals = [];
+function determineRegime(fgData, btcMacro) {
+    const fg  = fgData.value;
+    const d24 = btcMacro.change24h || 0;
+    const d7  = btcMacro.change7d  || 0;
 
-  try {
-    const m = getMarketSignals?.();
-    marketSignals = Array.isArray(m) ? m : [];
-  } catch {}
-
-  try {
-    const n = getNewsSignals?.();
-    newsSignals = Array.isArray(n) ? n : [];
-  } catch {}
-
-  return [...marketSignals, ...newsSignals];
+    if (fg < 20)                        return { label: "EXTREME_FEAR",  bias: "LONG",    description: "Capitulation zone — hunt reversals" };
+    if (fg < 30 && d24 < 0)             return { label: "FEAR",          bias: "LONG",    description: "Fear creates long opportunities" };
+    if (fg > 85)                        return { label: "EXTREME_GREED", bias: "SHORT",   description: "Extreme greed — short on rejections" };
+    if (fg > 75 && d24 > 3)             return { label: "GREED",         bias: "SHORT",   description: "Elevated greed — caution on longs" };
+    if (d7 < -10 && d24 < -2)           return { label: "BEAR_TREND",    bias: "SHORT",   description: "Downtrend — short bounces, tight stops" };
+    if (fg > 55 && d24 > 1 && d7 > 0)  return { label: "RISK-ON",       bias: "LONG",    description: "Expansion — favor longs on pullbacks" };
+    return                                     { label: "NEUTRAL",        bias: "NEUTRAL", description: "No regime bias — trade on merit" };
 }
 
-// ================================
-// 3. MARKET FLOW SIGNALS (REAL CONTEXT -> SIGNALS)
-// ================================
-
-function buildMarketFlowSignals(context) {
-  const signals = [];
-
-  if (!context?.ticker) return signals;
-
-  const priceChange = context.ticker.change24h;
-  const volume = context.ticker.volume;
-  const funding = context.funding?.fundingRate || 0;
-
-  // Trend signal
-  signals.push({
-    type: "market",
-    strength: priceChange > 0 ? 0.7 : 0.3,
-    label: `24h ${priceChange}%`
-  });
-
-  // Volume signal
-  signals.push({
-    type: "volume",
-    strength: volume > 100000 ? 0.7 : 0.4,
-    label: "volume flow"
-  });
-
-  // Funding signal (important for perps)
-  signals.push({
-    type: "funding",
-    strength: funding > 0 ? 0.6 : 0.4,
-    label: `funding ${funding}`
-  });
-
-  return signals;
-}
-
-// ================================
-// 4. SCORE ENGINE (PROP DESK STYLE)
-// ================================
-
-function scoreEngine(signals) {
-  if (!signals.length) return 0.5;
-
-  let score = 0;
-
-  for (const s of signals) {
-    let weight = 0.2;
-
-    if (s.type === "market") weight = 0.5;
-    if (s.type === "volume") weight = 0.3;
-    if (s.type === "funding") weight = 0.2;
-    if (s.type === "news") weight = 0.1;
-
-    score += weight * (s.strength ?? 0.5);
-  }
-
-  return Math.max(0, Math.min(1, score));
-}
-
-// ================================
-// 5. PROP DESK BIAS
-// ================================
-
-function bias(score) {
-  if (score >= 0.72) return "STRONG_LONG";
-  if (score >= 0.60) return "LONG";
-  if (score <= 0.28) return "STRONG_SHORT";
-  if (score <= 0.40) return "SHORT";
-  return "NO_TRADE";
-}
-
-// ================================
-// 6. TRADE FILTER
-// ================================
-
-function shouldTrade(score) {
-  return score >= 0.60 && score <= 0.85;
-}
-
-// ================================
-// 7. MAIN ENGINE RUN
-// ================================
-
-async function runEngine() {
-  await loadMarketContext();
-
-  const rawSignals = collectSignals();
-  const marketSignals = buildMarketFlowSignals(marketContext);
-
-  const signals = [...rawSignals, ...marketSignals];
-
-  const score = scoreEngine(signals);
-
-  const output = {
-    asset: "BTC",
-    bias: bias(score),
-    confidence: score,
-    should_trade: shouldTrade(score),
-    price: marketContext?.ticker?.price || null,
-    signals: signals.map(s => s.label)
-  };
-
-  console.log("\n=== PROP DESK ENGINE ===\n");
-  console.log(JSON.stringify(output, null, 2));
-  console.log("\n=========================\n");
-
-  return output;
-}
-
-// RUN IT
-runEngine();
+module.exports = { runMasterEngine };
