@@ -270,7 +270,7 @@ cron.schedule("0 2,6,10,14,18,22 * * *", () => {
 
 initializeSchema().catch(err => console.error("Journal init error:", err.message));
 
-setTimeout(() => { runAgent(); }, 5000);
+setTimeout(() => { runAgent(); }, 30000);
 
 console.log("\n╔══════════════════════════════════╗");
 console.log("║   MASTER ALPHA ENGINE ONLINE     ║");
