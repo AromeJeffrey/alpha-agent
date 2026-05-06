@@ -99,10 +99,9 @@ function detectLiquidityGrab(closes, resistance) {
 
 function detectSetup(coin, closes, ohlcData, trendingSymbols, fgValue, btcTrendScore) {
 
-    // ── ALTS ONLY — never trade BTC or ETH directly ───────
     const sym = coin.symbol.toUpperCase();
     if (sym === "BTC" || sym === "ETH") return null;
-    if (isBlacklisted(sym, coin.name)) return null;
+    if (isBlacklisted(sym, coin.name))  return null;
 
     const price    = coin.current_price;
     const rsi      = calculateRSI(closes);
@@ -128,112 +127,112 @@ function detectSetup(coin, closes, ohlcData, trendingSymbols, fgValue, btcTrendS
 
     // ── LONG SETUPS ───────────────────────────────────────
 
-    // Parabolic Candidate — ENJ pattern
-    if (mcap < 500_000_000 && volRatio > 3.0 && change > -20 && change < 8 && rsi > 30 && rsi < 58) {
-        direction = "LONG"; setupType = "PARABOLIC CANDIDATE 🚀"; timeframe = "3-8 hours";
-        stopLoss   = parseFloat((support * 0.95).toFixed(8));
+    // Parabolic Candidate — high volume, flat price, small cap
+    if (mcap < 2_000_000_000 && volRatio > 2.0 && change > -25 && change < 15 && rsi > 28 && rsi < 62) {
+        direction = "LONG"; setupType = "PARABOLIC CANDIDATE 🚀"; timeframe = "3-12 hours";
+        stopLoss   = parseFloat((support * 0.94).toFixed(8));
         takeProfit = parseFloat((price * 1.40).toFixed(8));
-        invalidation = `4h close below $${(support * 0.93).toFixed(8)}`;
-        reasoning  = `${volRatio.toFixed(1)}x volume on sub-$500M cap with flat price — institutional accumulation. RSI ${rsi} = room to run.`;
+        invalidation = `4h close below $${(support * 0.92).toFixed(8)}`;
+        reasoning  = `${volRatio.toFixed(1)}x volume on $${(mcap/1e6).toFixed(0)}M cap — accumulation before move. RSI ${rsi} = room to run.`;
         if (bullDiv.detected) { bonusScore = 10; reasoning += ` Bullish divergence confirms.`; }
     }
     // Bullish Divergence
-    else if (bullDiv.detected && rsi < 45 && volRatio > 1.5) {
+    else if (bullDiv.detected && rsi < 48 && volRatio > 0.8) {
         direction = "LONG"; setupType = "BULLISH DIVERGENCE 📈"; timeframe = "6-20 hours";
         stopLoss   = parseFloat((bullDiv.secondLow * 0.97).toFixed(8));
         takeProfit = parseFloat((price + atr * 4).toFixed(8));
         invalidation = `New lower low below $${bullDiv.secondLow.toFixed(8)}`;
-        reasoning  = `Price lower low but RSI higher low (${bullDiv.firstRSI}→${bullDiv.secondRSI}). Hidden strength.`;
+        reasoning  = `Price lower low but RSI higher low (${bullDiv.firstRSI}→${bullDiv.secondRSI}). Hidden strength — reversal incoming.`;
         bonusScore = 12;
     }
     // Oversold Reversal
-    else if (rsi < 32 && price <= support * 1.06 && volRatio > 1.5) {
+    else if (rsi < 33 && price <= support * 1.08 && volRatio > 0.8) {
         direction = "LONG"; setupType = "OVERSOLD REVERSAL"; timeframe = "4-16 hours";
-        stopLoss   = parseFloat((support * 0.95).toFixed(8));
+        stopLoss   = parseFloat((support * 0.94).toFixed(8));
         takeProfit = parseFloat((price + atr * 3.5).toFixed(8));
-        invalidation = `New low below $${(support * 0.93).toFixed(8)}`;
-        reasoning  = `RSI ${rsi} deeply oversold at support. Volume ${volRatio.toFixed(1)}x = accumulation.`;
+        invalidation = `New low below $${(support * 0.92).toFixed(8)}`;
+        reasoning  = `RSI ${rsi} deeply oversold near support $${support.toFixed(6)}. Volume ${volRatio.toFixed(1)}x = accumulation not panic.`;
         if (bullDiv.detected) { bonusScore = 8; reasoning += ` Bullish div confirms.`; }
     }
     // EMA Breakout
-    else if (price > ema21 && rsi > 50 && rsi < 70 && volRatio > 1.0 && change > 1 && change < 25) {
+    else if (price > ema21 && rsi > 48 && rsi < 72 && volRatio > 0.8 && change > 1 && change < 30) {
         direction = "LONG"; setupType = "EMA BREAKOUT"; timeframe = "6-18 hours";
         stopLoss   = parseFloat((ema21 * 0.97).toFixed(8));
         takeProfit = parseFloat((price + atr * 4).toFixed(8));
         invalidation = `4h close below EMA21 ($${ema21.toFixed(6)})`;
-        reasoning  = `EMA21 break with ${volRatio.toFixed(1)}x volume. RSI ${rsi} — momentum building.`;
+        reasoning  = `Clean EMA21 break with ${volRatio.toFixed(1)}x volume. RSI ${rsi} — momentum building, not exhausted.`;
     }
     // Accumulation Pre-Pump
-    else if (volRatio > 1.5 && Math.abs(change) < 8 && rsi > 35 && rsi < 55 && mcap < 5_000_000_000) {
+    else if (volRatio > 1.2 && Math.abs(change) < 10 && rsi > 33 && rsi < 58 && mcap < 10_000_000_000) {
         direction = "LONG"; setupType = "ACCUMULATION PRE-PUMP"; timeframe = "8-24 hours";
-        stopLoss   = parseFloat((support * 0.96).toFixed(8));
+        stopLoss   = parseFloat((support * 0.95).toFixed(8));
         takeProfit = parseFloat((price * 1.35).toFixed(8));
-        invalidation = `Volume drops below 1x average`;
-        reasoning  = `${volRatio.toFixed(1)}x volume with flat price — smart money loading quietly.`;
+        invalidation = `Volume drops below average and price breaks support`;
+        reasoning  = `${volRatio.toFixed(1)}x volume with contained price action — smart money positioning quietly.`;
     }
 
     // ── SHORT SETUPS ──────────────────────────────────────
 
-    // Bearish Divergence — strongest short signal
-    else if (bearDiv.detected && rsi > 55 && volRatio > 1.5) {
+    // Bearish Divergence
+    else if (bearDiv.detected && rsi > 52 && volRatio > 0.8) {
         direction = "SHORT"; setupType = "BEARISH DIVERGENCE 📉"; timeframe = "6-20 hours";
         stopLoss   = parseFloat((bearDiv.secondHigh * 1.03).toFixed(8));
         takeProfit = parseFloat((price - atr * 4).toFixed(8));
         invalidation = `New higher high above $${(bearDiv.secondHigh * 1.02).toFixed(8)}`;
-        reasoning  = `Price higher high but RSI lower high (${bearDiv.firstRSI}→${bearDiv.secondRSI}). Divergence ${bearDiv.divergenceStrength}pts. Distribution imminent.`;
+        reasoning  = `Price higher high but RSI lower high (${bearDiv.firstRSI}→${bearDiv.secondRSI}). Divergence ${bearDiv.divergenceStrength}pts — distribution phase.`;
         bonusScore = 12;
     }
     // Distribution Pattern
-    else if (distrib && rsi > 60 && change > 10) {
+    else if (distrib && rsi > 58 && change > 8) {
         direction = "SHORT"; setupType = "DISTRIBUTION PATTERN 📉"; timeframe = "8-24 hours";
         stopLoss   = parseFloat((resistance * 1.04).toFixed(8));
         takeProfit = parseFloat((price * 0.78).toFixed(8));
         invalidation = `Price holds above $${resistance.toFixed(8)} on next 4h close`;
-        reasoning  = `High volume on red candles after ${change.toFixed(1)}% move — smart money selling into retail.`;
+        reasoning  = `High volume on red candles after ${change.toFixed(1)}% move — institutions selling into retail buyers.`;
         bonusScore = 10;
     }
     // Liquidity Grab Short
-    else if (liqGrab && rsi > 65 && volRatio > 2.0) {
+    else if (liqGrab && rsi > 62 && volRatio > 1.5) {
         direction = "SHORT"; setupType = "LIQUIDITY GRAB 🪤"; timeframe = "4-12 hours";
         stopLoss   = parseFloat((resistance * 1.03).toFixed(8));
         takeProfit = parseFloat((support * 1.05).toFixed(8));
-        invalidation = `Price reclaims $${resistance.toFixed(8)} with volume`;
-        reasoning  = `Stop hunt above resistance then rejected — whale liquidity grab.`;
+        invalidation = `Price reclaims and holds above $${resistance.toFixed(8)}`;
+        reasoning  = `Stop hunt above resistance then hard rejection — whale trap. High probability reversal.`;
         bonusScore = 8;
     }
     // Overbought Rejection
-    else if (rsi > 76 && price >= resistance * 0.97 && volRatio < 1.5 && macd !== null && macd < 0) {
+    else if (rsi > 74 && price >= resistance * 0.96 && macd !== null && macd < 0) {
         direction = "SHORT"; setupType = "OVERBOUGHT REJECTION"; timeframe = "4-12 hours";
         stopLoss   = parseFloat((resistance * 1.04).toFixed(8));
         takeProfit = parseFloat((price - atr * 3).toFixed(8));
-        invalidation = `Price holds above resistance with volume`;
-        reasoning  = `RSI ${rsi} overbought at resistance. MACD negative. Low volume = no conviction.`;
-        if (bearDiv.detected) { bonusScore = 8; reasoning += ` Bearish div confirms.`; }
+        invalidation = `RSI drops below 68 and price holds above resistance`;
+        reasoning  = `RSI ${rsi} overbought at resistance $${resistance.toFixed(6)}. MACD bearish crossover. Exhaustion signal.`;
+        if (bearDiv.detected) { bonusScore = 8; reasoning += ` Bearish divergence adds conviction.`; }
     }
     // EMA Breakdown
-    else if (price < ema21 && rsi > 35 && rsi < 55 && volRatio > 2.0 && change < -3 && change > -30) {
+    else if (price < ema21 && rsi > 33 && rsi < 58 && volRatio > 1.2 && change < -2 && change > -35) {
         direction = "SHORT"; setupType = "EMA BREAKDOWN SHORT"; timeframe = "6-18 hours";
         stopLoss   = parseFloat((ema21 * 1.03).toFixed(8));
         takeProfit = parseFloat((price - atr * 3.5).toFixed(8));
         invalidation = `4h close back above EMA21 ($${ema21.toFixed(6)})`;
-        reasoning  = `EMA21 breakdown with ${volRatio.toFixed(1)}x volume. RSI ${rsi} = room to fall.`;
+        reasoning  = `EMA21 lost with ${volRatio.toFixed(1)}x volume. RSI ${rsi} — not oversold yet, room to fall.`;
         if (bearDiv.detected) { bonusScore = 8; reasoning += ` Bearish div adds conviction.`; }
     }
 
     if (!direction || !stopLoss || !takeProfit) return null;
 
-    // R:R gate — minimum 1:2
+    // R:R gate — minimum 1:1.8
     const riskAmt   = Math.abs(entry - stopLoss);
     const rewardAmt = Math.abs(takeProfit - entry);
     if (riskAmt === 0) return null;
     const rrRatio = parseFloat((rewardAmt / riskAmt).toFixed(2));
-    if (rrRatio < 2.0) return null;
+    if (rrRatio < 1.4) return null;
 
     // Confluence score
     const confluence = scoreConfluence({
         direction, rsi, volumeRatio: volRatio, priceChange: change,
         isNarrativeTrending: trending, marketCap: mcap,
-        fgValue, btcTrendScore, setupType
+        fgValue, btcTrendScore, setupType, hasNewsCatalyst: false
     });
     const finalScore = Math.min(confluence.total + bonusScore, 100);
     if (finalScore < MINIMUM_CONFLUENCE) return null;
@@ -273,6 +272,40 @@ function detectSetup(coin, closes, ohlcData, trendingSymbols, fgValue, btcTrendS
     };
 }
 
+// ─── FETCH FROM MULTIPLE PAGES ────────────────────────────
+// Scans top 1000 coins across 4 pages to catch mid/small caps
+// where the real altcoin action happens
+
+async function fetchAllCandidates() {
+    const pages    = [1, 2, 3, 4]; // top 1000 coins
+    const allCoins = [];
+
+    for (const page of pages) {
+        try {
+            const res = await axios.get(
+                "https://api.coingecko.com/api/v3/coins/markets",
+                {
+                    params: {
+                        vs_currency:             "usd",
+                        order:                   "market_cap_desc",
+                        per_page:                250,
+                        page,
+                        sparkline:               false,
+                        price_change_percentage: "24h"
+                    },
+                    timeout: 12000
+                }
+            );
+            allCoins.push(...res.data);
+            await new Promise(r => setTimeout(r, 1500)); // Respect rate limit between pages
+        } catch (err) {
+            console.error(`[Signals] Page ${page} fetch failed:`, err.message);
+        }
+    }
+
+    return allCoins;
+}
+
 // ─── MAIN ─────────────────────────────────────────────────
 
 async function getVolumeSignals(trendingSymbols = [], fgData = null, setupFeedback = {}) {
@@ -283,26 +316,28 @@ async function getVolumeSignals(trendingSymbols = [], fgData = null, setupFeedba
 
         console.log(`[Signals] BTC context: $${btcMacro.price?.toLocaleString()} (${btcMacro.trend}) | F&G: ${fgValue}`);
 
-        const response = await axios.get(
-            "https://api.coingecko.com/api/v3/coins/markets",
-            { params: { vs_currency: "usd", order: "market_cap_desc", per_page: 250, page: 1, sparkline: false, price_change_percentage: "24h" }, timeout: 10000 }
-        );
+        const allCoins  = await fetchAllCandidates();
+        const avgVolume = allCoins.reduce((s, c) => s + (c.total_volume || 0), 0) / allCoins.length;
 
-        const coins     = response.data;
-        const avgVolume = coins.reduce((s, c) => s + (c.total_volume || 0), 0) / coins.length;
+        console.log(`[Signals] Pool: ${allCoins.length} coins | Avg volume: $${(avgVolume/1e6).toFixed(0)}M`);
 
-        const candidates = coins
+        const candidates = allCoins
             .filter(c => {
                 const s = c.symbol.toUpperCase();
-                if (s === "BTC" || s === "ETH") return false; // Alts only
+                if (s === "BTC" || s === "ETH") return false;
                 if (isBlacklisted(s, c.name))   return false;
-                if (Math.abs(c.price_change_percentage_24h || 0) > 50) return false;
-                if ((c.market_cap || 0) > 100_000_000_000) return false;
-                return (c.total_volume || 0) / avgVolume > 0.3;
+                // Min $1M daily volume to ensure tradeable on Bybit/MEXC
+                if ((c.total_volume || 0) < 1_000_000) return false;
+                // Skip if already pumped 60%+ — too late to enter long safely
+                if ((c.price_change_percentage_24h || 0) > 60) return false;
+                // Skip if crashed more than 50% — avoid falling knives without confirmation
+                if ((c.price_change_percentage_24h || 0) < -50) return false;
+                return true;
             })
             .map(c => ({ ...c, volumeRatio: (c.total_volume || 0) / avgVolume }))
+            // Sort by volume ratio — highest relative volume first
             .sort((a, b) => b.volumeRatio - a.volumeRatio)
-            .slice(0, 30);
+            .slice(0, 60); // Scan top 60 by relative volume
 
         console.log(`[Signals] ${candidates.length} alt candidates scanning...`);
 
@@ -310,12 +345,18 @@ async function getVolumeSignals(trendingSymbols = [], fgData = null, setupFeedba
 
         for (const coin of candidates) {
             try {
-                const ohlcRes  = await axios.get(`https://api.coingecko.com/api/v3/coins/${coin.id}/ohlc`, { params: { vs_currency: "usd", days: 30 }, timeout: 8000 });
+                const ohlcRes  = await axios.get(
+                    `https://api.coingecko.com/api/v3/coins/${coin.id}/ohlc`,
+                    { params: { vs_currency: "usd", days: 30 }, timeout: 8000 }
+                );
                 const ohlcData = ohlcRes.data;
                 const closes   = ohlcData.map(c => c[4]);
-                await new Promise(r => setTimeout(r, 700));
+                await new Promise(r => setTimeout(r, 600));
                 const signal = detectSetup(coin, closes, ohlcData, trendingSymbols, fgValue, btcTrendScore);
-                if (signal) signals.push({ ...signal, btcTrend: btcMacro.trend });
+                if (signal) {
+                    signals.push({ ...signal, btcTrend: btcMacro.trend });
+                    console.log(`[Signals] Found: ${signal.symbol} ${signal.direction} ${signal.setupType} — score: ${signal.confluenceScore}`);
+                }
             } catch (err) {}
         }
 
@@ -339,9 +380,9 @@ async function getVolumeSignals(trendingSymbols = [], fgData = null, setupFeedba
         const bCount     = signals.filter(s => s.rank === "B").length;
 
         if (executable.length === 0) {
-            console.log(`[Signals] 0 alt trades passed confluence (${bCount} B-setups below threshold). NO TRADE.`);
+            console.log(`[Signals] 0 trades passed confluence (${bCount} B-setups below threshold). NO TRADE.`);
         } else {
-            console.log(`[Signals] ${executable.length} alt trades executable (${bCount} B rejected). Best: ${executable[0].rank} ${executable[0].symbol} ${executable[0].confluenceScore}/100`);
+            console.log(`[Signals] ✅ ${executable.length} executable trades (${bCount} B rejected). Best: ${executable[0].rank} ${executable[0].symbol} ${executable[0].confluenceScore}/100`);
         }
 
         return executable;
