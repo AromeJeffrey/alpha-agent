@@ -99,7 +99,10 @@ function detectLiquidityGrab(closes, resistance) {
 
 function detectSetup(coin, closes, ohlcData, trendingSymbols, fgValue, btcTrendScore) {
 
-    if (isBlacklisted(coin.symbol, coin.name)) return null;
+    // ── ALTS ONLY — never trade BTC or ETH directly ───────
+    const sym = coin.symbol.toUpperCase();
+    if (sym === "BTC" || sym === "ETH") return null;
+    if (isBlacklisted(sym, coin.name)) return null;
 
     const price    = coin.current_price;
     const rsi      = calculateRSI(closes);
@@ -110,7 +113,7 @@ function detectSetup(coin, closes, ohlcData, trendingSymbols, fgValue, btcTrendS
     const change   = coin.price_change_percentage_24h || 0;
     const volRatio = coin.volumeRatio;
     const mcap     = coin.market_cap || 0;
-    const trending = trendingSymbols.includes(coin.symbol.toUpperCase());
+    const trending = trendingSymbols.includes(sym);
 
     if (!rsi || !ema21) return null;
 
@@ -153,7 +156,7 @@ function detectSetup(coin, closes, ohlcData, trendingSymbols, fgValue, btcTrendS
         if (bullDiv.detected) { bonusScore = 8; reasoning += ` Bullish div confirms.`; }
     }
     // EMA Breakout
-    else if (price > ema21 && rsi > 52 && rsi < 68 && volRatio > 2.0 && change > 3 && change < 20) {
+    else if (price > ema21 && rsi > 50 && rsi < 70 && volRatio > 1.0 && change > 1 && change < 25) {
         direction = "LONG"; setupType = "EMA BREAKOUT"; timeframe = "6-18 hours";
         stopLoss   = parseFloat((ema21 * 0.97).toFixed(8));
         takeProfit = parseFloat((price + atr * 4).toFixed(8));
@@ -161,11 +164,11 @@ function detectSetup(coin, closes, ohlcData, trendingSymbols, fgValue, btcTrendS
         reasoning  = `EMA21 break with ${volRatio.toFixed(1)}x volume. RSI ${rsi} — momentum building.`;
     }
     // Accumulation Pre-Pump
-    else if (volRatio > 2.5 && Math.abs(change) < 5 && rsi > 38 && rsi < 52 && mcap < 1_000_000_000) {
+    else if (volRatio > 1.5 && Math.abs(change) < 8 && rsi > 35 && rsi < 55 && mcap < 5_000_000_000) {
         direction = "LONG"; setupType = "ACCUMULATION PRE-PUMP"; timeframe = "8-24 hours";
         stopLoss   = parseFloat((support * 0.96).toFixed(8));
         takeProfit = parseFloat((price * 1.35).toFixed(8));
-        invalidation = `Volume drops below 1.5x average`;
+        invalidation = `Volume drops below 1x average`;
         reasoning  = `${volRatio.toFixed(1)}x volume with flat price — smart money loading quietly.`;
     }
 
@@ -249,7 +252,7 @@ function detectSetup(coin, closes, ohlcData, trendingSymbols, fgValue, btcTrendS
     const actualVal = capital * leverage;
 
     return {
-        name: coin.name, symbol: coin.symbol.toUpperCase(),
+        name: coin.name, symbol: sym,
         price, change, volumeRatio: volRatio.toFixed(1), rsi,
         direction, setupType, rank,
         isParabolic: isParab,
@@ -278,7 +281,7 @@ async function getVolumeSignals(trendingSymbols = [], fgData = null, setupFeedba
         const fgValue       = fgData?.value || 50;
         const btcTrendScore = btcMacro.trendScore;
 
-        console.log(`[Signals] BTC: $${btcMacro.price?.toLocaleString()} (${btcMacro.trend}) | F&G: ${fgValue}`);
+        console.log(`[Signals] BTC context: $${btcMacro.price?.toLocaleString()} (${btcMacro.trend}) | F&G: ${fgValue}`);
 
         const response = await axios.get(
             "https://api.coingecko.com/api/v3/coins/markets",
@@ -290,7 +293,9 @@ async function getVolumeSignals(trendingSymbols = [], fgData = null, setupFeedba
 
         const candidates = coins
             .filter(c => {
-                if (isBlacklisted(c.symbol, c.name)) return false;
+                const s = c.symbol.toUpperCase();
+                if (s === "BTC" || s === "ETH") return false; // Alts only
+                if (isBlacklisted(s, c.name))   return false;
                 if (Math.abs(c.price_change_percentage_24h || 0) > 50) return false;
                 if ((c.market_cap || 0) > 100_000_000_000) return false;
                 return (c.total_volume || 0) / avgVolume > 0.3;
@@ -299,7 +304,7 @@ async function getVolumeSignals(trendingSymbols = [], fgData = null, setupFeedba
             .sort((a, b) => b.volumeRatio - a.volumeRatio)
             .slice(0, 30);
 
-        console.log(`[Signals] ${candidates.length} candidates scanning...`);
+        console.log(`[Signals] ${candidates.length} alt candidates scanning...`);
 
         const signals = [];
 
@@ -334,9 +339,9 @@ async function getVolumeSignals(trendingSymbols = [], fgData = null, setupFeedba
         const bCount     = signals.filter(s => s.rank === "B").length;
 
         if (executable.length === 0) {
-            console.log(`[Signals] 0 trades passed confluence (${bCount} B-setups below threshold). NO TRADE.`);
+            console.log(`[Signals] 0 alt trades passed confluence (${bCount} B-setups below threshold). NO TRADE.`);
         } else {
-            console.log(`[Signals] ${executable.length} executable (${bCount} B rejected). Best: ${executable[0].rank} ${executable[0].confluenceScore}/100`);
+            console.log(`[Signals] ${executable.length} alt trades executable (${bCount} B rejected). Best: ${executable[0].rank} ${executable[0].symbol} ${executable[0].confluenceScore}/100`);
         }
 
         return executable;
